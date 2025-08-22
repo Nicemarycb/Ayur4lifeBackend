@@ -4,7 +4,6 @@ const { authenticateToken } = require('../middleware/auth');
 
 const router = express.Router();
 
-// Get user's cart
 router.get('/', authenticateToken, async (req, res) => {
   try {
     const cartSnapshot = await db.collection('carts')
@@ -57,7 +56,7 @@ router.get('/', authenticateToken, async (req, res) => {
   }
 });
 
-// Add item to cart
+// Add item to cart (updated to return full cartItems)
 router.post('/add', authenticateToken, async (req, res) => {
   try {
     const { productId, quantity = 1 } = req.body;
@@ -77,55 +76,86 @@ router.post('/add', authenticateToken, async (req, res) => {
       return res.status(400).json({ error: 'Product is not available' });
     }
 
-    // Check stock availability
+    // Check stock
     if (product.stock < quantity) {
-      return res.status(400).json({ error: 'Insufficient stock available' });
+      return res.status(400).json({ error: 'Insufficient stock' });
     }
 
-    // Check if item already exists in cart
-    const existingCartItem = await db.collection('carts')
+    // Check if item already in cart
+    const existingCartItemSnapshot = await db.collection('carts')
       .where('userId', '==', req.user.uid)
       .where('productId', '==', productId)
       .limit(1)
       .get();
 
-    if (!existingCartItem.empty) {
-      // Update existing cart item
-      const cartItem = existingCartItem.docs[0];
-      const newQuantity = cartItem.data().quantity + quantity;
-      
-      if (product.stock < newQuantity) {
-        return res.status(400).json({ error: 'Insufficient stock available' });
-      }
+    let updatedQuantity = quantity;
+    if (!existingCartItemSnapshot.empty) {
+      const existingCartItem = existingCartItemSnapshot.docs[0];
+      const existingData = existingCartItem.data();
+      updatedQuantity = existingData.quantity + quantity;
 
-      await cartItem.ref.update({
-        quantity: newQuantity,
+      // Update existing item
+      await existingCartItem.ref.update({
+        quantity: updatedQuantity,
         updatedAt: new Date().toISOString()
       });
-
-      res.json({
-        message: 'Cart item updated successfully',
-        cartItemId: cartItem.id,
-        quantity: newQuantity
-      });
     } else {
-      // Add new cart item
-      const cartItemData = {
+      // Add new item
+      await db.collection('carts').add({
         userId: req.user.uid,
         productId,
         quantity,
-        createdAt: new Date().toISOString(),
+        addedAt: new Date().toISOString(),
         updatedAt: new Date().toISOString()
-      };
-
-      const docRef = await db.collection('carts').add(cartItemData);
-
-      res.status(201).json({
-        message: 'Item added to cart successfully',
-        cartItemId: docRef.id,
-        quantity
       });
     }
+
+    // Fetch updated cart items (full list)
+    const cartSnapshot = await db.collection('carts')
+      .where('userId', '==', req.user.uid)
+      .get();
+
+    const cartItems = [];
+    let totalAmount = 0;
+    let totalItems = 0;
+
+    for (const doc of cartSnapshot.docs) {
+      const cartItem = doc.data();
+      
+      // Get product details
+      const prodDoc = await db.collection('products').doc(cartItem.productId).get();
+      
+      if (prodDoc.exists) {
+        const prod = prodDoc.data();
+        const itemTotal = (prod.price + (prod.gst || 0)) * cartItem.quantity;
+        
+        cartItems.push({
+          id: doc.id,
+          product: {
+            id: prodDoc.id,
+            ...prod
+          },
+          quantity: cartItem.quantity,
+          itemTotal: itemTotal
+        });
+        
+        totalAmount += itemTotal;
+        totalItems += cartItem.quantity;
+      } else {
+        // Remove invalid cart item
+        await doc.ref.delete();
+      }
+    }
+
+    res.json({
+      message: 'Item added to cart successfully',
+      updatedQuantity,
+      cartItems,  // Return full updated cart
+      totalAmount: parseFloat(totalAmount.toFixed(2)),
+      totalItems,
+      gstAmount: parseFloat((totalAmount * 0.18).toFixed(2)),
+      finalAmount: parseFloat((totalAmount * 1.18).toFixed(2))
+    });
 
   } catch (error) {
     console.error('Add to cart error:', error);
@@ -133,23 +163,24 @@ router.post('/add', authenticateToken, async (req, res) => {
   }
 });
 
-// Update cart item quantity
+// Update cart item quantity (updated to return full cartItems)
 router.put('/update/:id', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
     const { quantity } = req.body;
 
-    if (!quantity || quantity < 1) {
+    if (quantity === undefined || quantity < 1) {
       return res.status(400).json({ error: 'Valid quantity is required' });
     }
 
-    // Get cart item
     const cartItemDoc = await db.collection('carts').doc(id).get();
+
     if (!cartItemDoc.exists) {
       return res.status(404).json({ error: 'Cart item not found' });
     }
 
     const cartItem = cartItemDoc.data();
+
     if (cartItem.userId !== req.user.uid) {
       return res.status(403).json({ error: 'Unauthorized access' });
     }
@@ -162,7 +193,7 @@ router.put('/update/:id', authenticateToken, async (req, res) => {
 
     const product = productDoc.data();
     if (product.stock < quantity) {
-      return res.status(400).json({ error: 'Insufficient stock available' });
+      return res.status(400).json({ error: 'Insufficient stock' });
     }
 
     // Update quantity
@@ -171,13 +202,54 @@ router.put('/update/:id', authenticateToken, async (req, res) => {
       updatedAt: new Date().toISOString()
     });
 
+    // Fetch updated cart items (full list)
+    const cartSnapshot = await db.collection('carts')
+      .where('userId', '==', req.user.uid)
+      .get();
+
+    const cartItems = [];
+    let totalAmount = 0;
+    let totalItems = 0;
+
+    for (const doc of cartSnapshot.docs) {
+      const updatedCartItem = doc.data();
+      
+      // Get product details
+      const prodDoc = await db.collection('products').doc(updatedCartItem.productId).get();
+      
+      if (prodDoc.exists) {
+        const prod = prodDoc.data();
+        const itemTotal = (prod.price + (prod.gst || 0)) * updatedCartItem.quantity;
+        
+        cartItems.push({
+          id: doc.id,
+          product: {
+            id: prodDoc.id,
+            ...prod
+          },
+          quantity: updatedCartItem.quantity,
+          itemTotal: itemTotal
+        });
+        
+        totalAmount += itemTotal;
+        totalItems += updatedCartItem.quantity;
+      } else {
+        // Remove invalid cart item
+        await doc.ref.delete();
+      }
+    }
+
     res.json({
       message: 'Cart item updated successfully',
-      quantity
+      cartItems,  // Return full updated cart
+      totalAmount: parseFloat(totalAmount.toFixed(2)),
+      totalItems,
+      gstAmount: parseFloat((totalAmount * 0.18).toFixed(2)),
+      finalAmount: parseFloat((totalAmount * 1.18).toFixed(2))
     });
 
   } catch (error) {
-    console.error('Update cart error:', error);
+    console.error('Update cart item error:', error);
     res.status(500).json({ error: 'Failed to update cart item', details: error.message });
   }
 });
@@ -201,9 +273,50 @@ router.delete('/remove/:id', authenticateToken, async (req, res) => {
     // Delete cart item
     await cartItemDoc.ref.delete();
 
+ const cartSnapshot = await db.collection('carts')
+      .where('userId', '==', req.user.uid)
+      .get();
+
+    const cartItems = [];
+    let totalAmount = 0;
+    let totalItems = 0;
+
+    for (const doc of cartSnapshot.docs) {
+      const updatedCartItem = doc.data();
+      
+      // Get product details
+      const productDoc = await db.collection('products').doc(updatedCartItem.productId).get();
+      
+      if (productDoc.exists) {
+        const product = productDoc.data();
+        const itemTotal = (product.price + (product.gst || 0)) * updatedCartItem.quantity;
+        
+        cartItems.push({
+          id: doc.id,
+          product: {
+            id: productDoc.id,
+            ...product
+          },
+          quantity: updatedCartItem.quantity,
+          itemTotal: itemTotal
+        });
+        
+        totalAmount += itemTotal;
+        totalItems += updatedCartItem.quantity;
+      } else {
+        // Remove invalid cart item
+        await doc.ref.delete();
+      }
+    }
+
     res.json({
       message: 'Item removed from cart successfully',
-      cartItemId: id
+      cartItemId: id,
+      cartItems,  // Return updated cart items
+      totalAmount: parseFloat(totalAmount.toFixed(2)),
+      totalItems,
+      gstAmount: parseFloat((totalAmount * 0.18).toFixed(2)),
+      finalAmount: parseFloat((totalAmount * 1.18).toFixed(2))
     });
 
   } catch (error) {

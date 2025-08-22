@@ -290,5 +290,10 @@ function generateOrderNumber() {
   const random = Math.floor(Math.random() * 1000).toString().padStart(3, '0');
   return `AYUR${timestamp.slice(-6)}${random}`;
 }
+// function generateOrderNumber() {
+//   const timestamp = new Date().getTime();
+//   const randomPart = Math.floor(Math.random() * 10000);
+//   return `ORD-${timestamp}-${randomPart}`;
+// }
 
 module.exports = router;
