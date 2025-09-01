@@ -4,6 +4,7 @@ const { authenticateToken } = require('../middleware/auth');
 
 const router = express.Router();
 
+// GET /api/cart
 router.get('/', authenticateToken, async (req, res) => {
   try {
     const cartSnapshot = await db.collection('carts')
@@ -11,19 +12,21 @@ router.get('/', authenticateToken, async (req, res) => {
       .get();
 
     const cartItems = [];
-    let totalAmount = 0;
+    let subtotal = 0;
     let totalItems = 0;
 
     for (const doc of cartSnapshot.docs) {
       const cartItem = doc.data();
-      
+
       // Get product details
       const productDoc = await db.collection('products').doc(cartItem.productId).get();
-      
+
       if (productDoc.exists) {
         const product = productDoc.data();
-        const itemTotal = (product.price + (product.gst || 0)) * cartItem.quantity;
-        
+
+        // ✅ Use product.price only, GST will be added once at the end
+        const itemTotal = (product.price || 0) * cartItem.quantity;
+
         cartItems.push({
           id: doc.id,
           product: {
@@ -31,10 +34,10 @@ router.get('/', authenticateToken, async (req, res) => {
             ...product
           },
           quantity: cartItem.quantity,
-          itemTotal: itemTotal
+          itemTotal: parseFloat(itemTotal.toFixed(2))
         });
-        
-        totalAmount += itemTotal;
+
+        subtotal += itemTotal;
         totalItems += cartItem.quantity;
       } else {
         // Remove invalid cart item
@@ -42,12 +45,16 @@ router.get('/', authenticateToken, async (req, res) => {
       }
     }
 
+    // ✅ GST applied once on subtotal
+    const gstAmount = subtotal * 0.18;
+    const finalAmount = subtotal + gstAmount;
+
     res.json({
       cartItems,
-      totalAmount: parseFloat(totalAmount.toFixed(2)),
-      totalItems,
-      gstAmount: parseFloat((totalAmount * 0.18).toFixed(2)), // 18% GST
-      finalAmount: parseFloat((totalAmount * 1.18).toFixed(2))
+      subtotal: parseFloat(subtotal.toFixed(2)),
+      gstAmount: parseFloat(gstAmount.toFixed(2)),
+      finalAmount: parseFloat(finalAmount.toFixed(2)),
+      totalItems
     });
 
   } catch (error) {
@@ -55,6 +62,7 @@ router.get('/', authenticateToken, async (req, res) => {
     res.status(500).json({ error: 'Failed to fetch cart', details: error.message });
   }
 });
+
 
 // Add item to cart (updated to return full cartItems)
 router.post('/add', authenticateToken, async (req, res) => {

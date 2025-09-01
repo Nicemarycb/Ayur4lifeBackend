@@ -45,8 +45,8 @@ router.post('/', authenticateToken, async (req, res) => {
         });
       }
 
-      const itemPrice = product.price + (product.gst || 0);
-      const itemTotal = itemPrice * cartItem.quantity;
+      // ✅ Use base price only (NO GST here)
+      const itemTotal = product.price * cartItem.quantity;
       
       orderItems.push({
         productId: cartItem.productId,
@@ -54,7 +54,6 @@ router.post('/', authenticateToken, async (req, res) => {
         productImage: product.images?.[0] || '',
         quantity: cartItem.quantity,
         unitPrice: product.price,
-        gst: product.gst || 0,
         itemTotal: itemTotal
       });
 
@@ -68,9 +67,9 @@ router.post('/', authenticateToken, async (req, res) => {
       });
     }
 
-    // Calculate totals
-    const gstAmount = subtotal * 0.18; // 18% GST
-    const discountAmount = 0; // Apply coupon logic here if needed
+    // ✅ GST only once on subtotal
+    const gstAmount = subtotal * 0.18; 
+    const discountAmount = 0; // coupon logic if needed
     const finalAmount = subtotal + gstAmount - discountAmount;
 
     // Create order
@@ -114,6 +113,7 @@ router.post('/', authenticateToken, async (req, res) => {
     res.status(500).json({ error: 'Failed to create order', details: error.message });
   }
 });
+
 
 // Get user's orders
 router.get('/', authenticateToken, async (req, res) => {

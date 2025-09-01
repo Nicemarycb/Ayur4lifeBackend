@@ -47,6 +47,8 @@ router.post('/register', async (req, res) => {
       lastName,
       phone: phone || '',
       address: address || '',
+       gender: req.body.gender || '',
+       dateOfBirth: req.body.dateOfBirth || '',
       password: hashedPassword, // Store hashed password in Firestore
       role: 'user',
       createdAt: new Date().toISOString(),
@@ -163,31 +165,106 @@ router.get('/profile', authenticateToken, async (req, res) => {
   }
 });
 
+// // Update User Profile
+// router.put('/profile', authenticateToken, async (req, res) => {
+//   try {
+//     const { firstName, lastName, phone, address } = req.body;
+//     const updates = {
+//       firstName: firstName || req.user.firstName,
+//       lastName: lastName || req.user.lastName,
+//       phone: phone || '',
+//       address: address || '',
+//        gender: gender || '',
+//        dateOfBirth: dateOfBirth || '',
+//       updatedAt: new Date().toISOString()
+//     };
+
+//     await db.collection('users').doc(req.user.uid).update(updates);
+
+//     res.json({
+//       message: 'Profile updated successfully',
+//       user: updates
+//     });
+
+//   } catch (error) {
+//     console.error('Profile update error:', error);
+//     res.status(500).json({ error: 'Failed to update profile', details: error.message });
+//   }
+// });
+
 // Update User Profile
 router.put('/profile', authenticateToken, async (req, res) => {
   try {
-    const { firstName, lastName, phone, address } = req.body;
-    const updates = {
-      firstName: firstName || req.user.firstName,
-      lastName: lastName || req.user.lastName,
-      phone: phone || '',
-      address: address || '',
-      updatedAt: new Date().toISOString()
-    };
+    const { firstName, lastName, phone, address, gender, dateOfBirth } = req.body;
+    const updates = {};
 
-    await db.collection('users').doc(req.user.uid).update(updates);
+    if (firstName) updates.firstName = firstName;
+    if (lastName) updates.lastName = lastName;
+    if (phone) updates.phone = phone;
+    if (address) updates.address = address;
+    if (gender) updates.gender = gender;
+    if (dateOfBirth) updates.dateOfBirth = dateOfBirth;
+
+    if (Object.keys(updates).length > 0) {
+      updates.updatedAt = new Date().toISOString();
+      await db.collection('users').doc(req.user.uid).update(updates);
+    }
 
     res.json({
       message: 'Profile updated successfully',
-      user: updates
+      user: { ...req.user, ...updates }
     });
 
   } catch (error) {
-    console.error('Profile update error:', error);
-    res.status(500).json({ error: 'Failed to update profile', details: error.message });
+      console.error('Profile update error:', error);
+      res.status(500).json({ error: 'Failed to update profile', details: error.message });
   }
 });
 
+// // Change Password
+// router.put('/change-password', authenticateToken, async (req, res) => {
+//   try {
+//     const { currentPassword, newPassword } = req.body;
+
+//     if (!currentPassword || !newPassword) {
+//       return res.status(400).json({ error: 'Current and new password are required' });
+//     }
+
+//     if (newPassword.length < 6) {
+//       return res.status(400).json({ error: 'New password must be at least 6 characters long' });
+//     }
+
+//     // Get current user data
+//     const userDoc = await db.collection('users').doc(req.user.uid).get();
+//     const userData = userDoc.data();
+
+//     // Verify current password
+//     const isValidPassword = await bcrypt.compare(currentPassword, userData.password);
+//     if (!isValidPassword) {
+//       return res.status(401).json({ error: 'Current password is incorrect' });
+//     }
+
+//     // Hash new password
+//     const hashedNewPassword = await bcrypt.hash(newPassword, 12);
+
+//     // Update password in Firestore
+//     await db.collection('users').doc(req.user.uid).update({
+//       password: hashedNewPassword,
+//       updatedAt: new Date().toISOString()
+//     });
+
+//     // Update password in Firebase Auth
+//     await auth.updateUser(req.user.uid, {
+//       password: newPassword
+//     });
+
+//     res.json({ message: 'Password changed successfully' });
+
+//   } catch (error) {
+//     console.error('Password change error:', error);
+//     res.status(500).json({ error: 'Failed to change password', details: error.message });
+//   }
+// });
 // Change Password
 router.put('/change-password', authenticateToken, async (req, res) => {
   try {
@@ -201,28 +278,20 @@ router.put('/change-password', authenticateToken, async (req, res) => {
       return res.status(400).json({ error: 'New password must be at least 6 characters long' });
     }
 
-    // Get current user data
     const userDoc = await db.collection('users').doc(req.user.uid).get();
     const userData = userDoc.data();
 
-    // Verify current password
+    // Verify current password against the hashed password from the database
     const isValidPassword = await bcrypt.compare(currentPassword, userData.password);
     if (!isValidPassword) {
       return res.status(401).json({ error: 'Current password is incorrect' });
     }
 
-    // Hash new password
+    // Hash the new password and update it in Firestore only
     const hashedNewPassword = await bcrypt.hash(newPassword, 12);
-
-    // Update password in Firestore
     await db.collection('users').doc(req.user.uid).update({
       password: hashedNewPassword,
       updatedAt: new Date().toISOString()
-    });
-
-    // Update password in Firebase Auth
-    await auth.updateUser(req.user.uid, {
-      password: newPassword
     });
 
     res.json({ message: 'Password changed successfully' });

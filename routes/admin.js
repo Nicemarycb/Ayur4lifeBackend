@@ -1129,6 +1129,40 @@ router.get('/orders', authenticateToken, requireAdmin, async (req, res) => {
   }
 });
 
+// // Get all users (admin only)
+// router.get('/users', authenticateToken, requireAdmin, async (req, res) => {
+//   try {
+//     const { limit = 50, page = 1 } = req.query;
+    
+//     const usersSnapshot = await db.collection('users')
+//       .orderBy('createdAt', 'desc')
+//       .limit(parseInt(limit))
+//       .get();
+
+//     const users = [];
+//     usersSnapshot.forEach(doc => {
+//       const userData = doc.data();
+//       delete userData.password; // Don't send passwords
+//       users.push({
+//         id: doc.id,
+//         ...userData
+//       });
+//     });
+
+//     res.json({
+//       users,
+//       pagination: {
+//         currentPage: parseInt(page),
+//         totalItems: users.length,
+//         itemsPerPage: parseInt(limit)
+//       }
+//     });
+
+//   } catch (error) {
+//     console.error('Get users error:', error);
+//     res.status(500).json({ error: 'Failed to fetch users', details: error.message });
+//   }
+// });
 // Get all users (admin only)
 router.get('/users', authenticateToken, requireAdmin, async (req, res) => {
   try {
@@ -1140,14 +1174,22 @@ router.get('/users', authenticateToken, requireAdmin, async (req, res) => {
       .get();
 
     const users = [];
-    usersSnapshot.forEach(doc => {
+
+    for (const doc of usersSnapshot.docs) {
       const userData = doc.data();
-      delete userData.password; // Don't send passwords
+      delete userData.password; // Don’t send password
+
+      // 🔹 Get order count for this user
+      const ordersSnapshot = await db.collection('orders')
+        .where('userId', '==', doc.id)
+        .get();
+
       users.push({
         id: doc.id,
-        ...userData
+        ...userData,
+        orderCount: ordersSnapshot.size   // ✅ add this field
       });
-    });
+    }
 
     res.json({
       users,
@@ -1163,6 +1205,7 @@ router.get('/users', authenticateToken, requireAdmin, async (req, res) => {
     res.status(500).json({ error: 'Failed to fetch users', details: error.message });
   }
 });
+
 
 // Get a specific user by ID (for admin)
 router.get('/users/:id', authenticateToken, requireAdmin, async (req, res) => {
@@ -1220,5 +1263,44 @@ router.get('/users/:id/orders', authenticateToken, requireAdmin, async (req, res
     res.status(500).json({ error: 'Failed to fetch user orders', details: error.message });
   }
 });
+
+// Delete a user (admin only)
+router.delete('/users/:id', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const userDoc = await db.collection('users').doc(id).get();
+    if (!userDoc.exists) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    await db.collection('users').doc(id).delete();
+
+    res.json({ message: 'User deleted successfully', userId: id });
+  } catch (error) {
+    console.error('Delete user error:', error);
+    res.status(500).json({ error: 'Failed to delete user', details: error.message });
+  }
+});
+
+// Delete an order (admin only)
+router.delete('/orders/:id', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const orderDoc = await db.collection('orders').doc(id).get();
+    if (!orderDoc.exists) {
+      return res.status(404).json({ error: 'Order not found' });
+    }
+
+    await db.collection('orders').doc(id).delete();
+
+    res.json({ message: 'Order deleted successfully', orderId: id });
+  } catch (error) {
+    console.error('Delete order error:', error);
+    res.status(500).json({ error: 'Failed to delete order', details: error.message });
+  }
+});
+
 
 module.exports = router;

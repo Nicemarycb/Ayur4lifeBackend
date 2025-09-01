@@ -706,13 +706,12 @@ const router = express.Router();
 // Configure multer for memory storage
 const upload = multer({ storage: multer.memoryStorage() });
 
-// Helper function to upload images to Firebase Storage and get URLs
-async function uploadImages(files) {
-  const imageUrls = [];
+async function uploadFiles(files, folder = 'products') {
+  const urls = [];
   const bucket = storage.bucket();
 
   for (const file of files) {
-    const fileName = `products/${Date.now()}_${file.originalname}`;
+    const fileName = `${folder}/${Date.now()}_${file.originalname}`;
     const blob = bucket.file(fileName);
     const blobStream = blob.createWriteStream({
       metadata: { contentType: file.mimetype }
@@ -726,10 +725,10 @@ async function uploadImages(files) {
     });
 
     const [url] = await blob.getSignedUrl({ action: 'read', expires: '12-31-2100' });
-    imageUrls.push(url);
+    urls.push(url);
   }
 
-  return imageUrls;
+  return urls;
 }
 
 // Normalize function for case-insensitive comparisons
@@ -898,8 +897,11 @@ router.get('/:id', optionalAuth, async (req, res) => {
   }
 });
 
-// Admin: Add new product
-router.post('/admin/products', authenticateToken, requireAdmin, upload.array('images', 5), async (req, res) => {
+// Update the POST route to handle multiple images and video
+router.post('/admin/products', authenticateToken, requireAdmin, upload.fields([
+  { name: 'images', maxCount: 5 },
+  { name: 'video', maxCount: 1 }
+]), async (req, res) => {
   try {
     const { name, description, price, category, stock, gst, features } = req.body;
     const files = req.files;
@@ -909,8 +911,14 @@ router.post('/admin/products', authenticateToken, requireAdmin, upload.array('im
     }
 
     let imageUrls = [];
-    if (files && files.length > 0) {
-      imageUrls = await uploadImages(files);
+    if (files.images && files.images.length > 0) {
+      imageUrls = await uploadFiles(files.images, 'products/images');
+    }
+
+    let videoUrl = '';
+    if (files.video && files.video.length > 0) {
+      const videoUrls = await uploadFiles(files.video, 'products/videos');
+      videoUrl = videoUrls[0];
     }
 
     const productData = {
@@ -921,6 +929,7 @@ router.post('/admin/products', authenticateToken, requireAdmin, upload.array('im
       stock: parseInt(stock),
       gst: parseFloat(gst) || 0,
       images: imageUrls,
+      video: videoUrl,  // Add video URL
       features: features ? JSON.parse(features) : [],
       isActive: true,
       createdAt: new Date().toISOString(),
@@ -943,8 +952,298 @@ router.post('/admin/products', authenticateToken, requireAdmin, upload.array('im
   }
 });
 
-// Admin: Update product
-router.put('/admin/products/:id', authenticateToken, requireAdmin, upload.array('images', 5), async (req, res) => {
+
+// // Update product image
+// router.put('/admin/products/:id/image/:index', authenticateToken, requireAdmin, upload.single('image'), async (req, res) => {
+//   try {
+//     const { id, index } = req.params;
+//     const file = req.file;
+    
+//     if (!file) {
+//       return res.status(400).json({ error: 'No image file provided' });
+//     }
+    
+//     // Upload new image
+//     const imageUrl = await uploadImages([file]);
+    
+//     // Get current product
+//     const productDoc = await db.collection('products').doc(id).get();
+//     if (!productDoc.exists) {
+//       return res.status(404).json({ error: 'Product not found' });
+//     }
+    
+//     const productData = productDoc.data();
+//     const images = productData.images || [];
+    
+//     // Replace image at specified index
+//     if (index >= 0 && index < images.length) {
+//       images[index] = imageUrl[0];
+//     } else {
+//       // Add new image if index is beyond current array
+//       images.push(imageUrl[0]);
+//     }
+    
+//     // Update product
+//     await db.collection('products').doc(id).update({
+//       images,
+//       updatedAt: new Date().toISOString()
+//     });
+    
+//     res.json({
+//       message: 'Product image updated successfully',
+//       imageUrl: imageUrl[0]
+//     });
+//   } catch (error) {
+//     console.error('Update product image error:', error);
+//     res.status(500).json({ error: 'Failed to update product image', details: error.message });
+//   }
+// });
+
+// // Remove product image
+// router.delete('/admin/products/:id/image/:index', authenticateToken, requireAdmin, async (req, res) => {
+//   try {
+//     const { id, index } = req.params;
+    
+//     // Get current product
+//     const productDoc = await db.collection('products').doc(id).get();
+//     if (!productDoc.exists) {
+//       return res.status(404).json({ error: 'Product not found' });
+//     }
+    
+//     const productData = productDoc.data();
+//     const images = productData.images || [];
+    
+//     // Check if we have at least one image remaining
+//     if (images.length <= 1) {
+//       return res.status(400).json({ error: 'Product must have at least one image' });
+//     }
+    
+//     // Remove image at specified index
+//     if (index >= 0 && index < images.length) {
+//       images.splice(index, 1);
+//     }
+    
+//     // Update product
+//     await db.collection('products').doc(id).update({
+//       images,
+//       updatedAt: new Date().toISOString()
+//     });
+    
+//     res.json({
+//       message: 'Product image removed successfully'
+//     });
+//   } catch (error) {
+//     console.error('Remove product image error:', error);
+//     res.status(500).json({ error: 'Failed to remove product image', details: error.message });
+//   }
+// });
+
+
+// // UPDATED: Fix typo in upload function (uploadImages -> uploadFiles)
+// router.put('/admin/products/:id/image/:index', authenticateToken, requireAdmin, upload.single('image'), async (req, res) => {
+//   try {
+//     const { id, index } = req.params;
+//     const file = req.file;
+    
+//     if (!file) {
+//       return res.status(400).json({ error: 'No image file provided' });
+//     }
+    
+//     // Upload new image (FIXED: Changed to uploadFiles)
+//     const imageUrls = await uploadFiles([file], 'products/images');
+    
+//     // Get current product
+//     const productDoc = await db.collection('products').doc(id).get();
+//     if (!productDoc.exists) {
+//       return res.status(404).json({ error: 'Product not found' });
+//     }
+    
+//     const productData = productDoc.data();
+//     const images = productData.images || [];
+    
+//     // Replace image at specified index
+//     if (parseInt(index) >= 0 && parseInt(index) < images.length) {
+//       images[parseInt(index)] = imageUrls[0];
+//     } else {
+//       // Add new image if index is beyond current array
+//       images.push(imageUrls[0]);
+//     }
+    
+//     // Update product
+//     await db.collection('products').doc(id).update({
+//       images,
+//       updatedAt: new Date().toISOString()
+//     });
+    
+//     res.json({
+//       success: true,
+//       message: 'Product image updated successfully',
+//       imageUrl: imageUrls[0]
+//     });
+//   } catch (error) {
+//     console.error('Update product image error:', error);
+//     res.status(500).json({ error: 'Failed to update product image', details: error.message });
+//   }
+// });
+
+
+// Update product image
+router.put('/admin/products/:id/image/:index', authenticateToken, requireAdmin, upload.single('image'), async (req, res) => {
+  try {
+    const { id, index } = req.params;
+    const file = req.file;
+
+    if (!file) return res.status(400).json({ error: 'No image uploaded' });
+
+    const [url] = await uploadFiles([file], 'products/images');
+
+    const productRef = db.collection('products').doc(id);
+    const productDoc = await productRef.get();
+    if (!productDoc.exists) return res.status(404).json({ error: 'Product not found' });
+
+    const data = productDoc.data();
+    data.images[parseInt(index)] = url;
+    await productRef.update({ images: data.images, updatedAt: new Date().toISOString() });
+
+    res.json({ success: true, images: data.images });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to update image', details: err.message });
+  }
+});
+
+
+// Existing DELETE image route (no changes, but now with frontend refresh, 400s should be prevented)
+router.delete('/admin/products/:id/image/:index', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const { id, index } = req.params;
+    
+    // Get current product
+    const productDoc = await db.collection('products').doc(id).get();
+    if (!productDoc.exists) {
+      return res.status(404).json({ error: 'Product not found' });
+    }
+    
+    const productData = productDoc.data();
+    const images = productData.images || [];
+    
+    // Check if we have at least one image remaining
+    if (images.length <= 1) {
+      return res.status(400).json({ error: 'Product must have at least one image' });
+    }
+    
+    // Remove image at specified index
+    if (parseInt(index) >= 0 && parseInt(index) < images.length) {
+      images.splice(parseInt(index), 1);
+    }
+    
+    // Update product
+    await db.collection('products').doc(id).update({
+      images,
+      updatedAt: new Date().toISOString()
+    });
+    
+    res.json({
+      success: true,
+      message: 'Product image removed successfully'
+    });
+  } catch (error) {
+    console.error('Remove product image error:', error);
+    res.status(500).json({ error: 'Failed to remove product image', details: error.message });
+  }
+});
+
+// // NEW: Update product video
+// router.put('/admin/products/:id/video', authenticateToken, requireAdmin, upload.single('video'), async (req, res) => {
+//   try {
+//     const { id } = req.params;
+//     const file = req.file;
+    
+//     if (!file) {
+//       return res.status(400).json({ error: 'No video file provided' });
+//     }
+    
+//     // Upload new video
+//     const videoUrls = await uploadFiles([file], 'products/videos');
+//     const videoUrl = videoUrls[0];
+    
+//     // Get current product
+//     const productDoc = await db.collection('products').doc(id).get();
+//     if (!productDoc.exists) {
+//       return res.status(404).json({ error: 'Product not found' });
+//     }
+    
+//     // Update product video
+//     await db.collection('products').doc(id).update({
+//       video: videoUrl,
+//       updatedAt: new Date().toISOString()
+//     });
+    
+//     res.json({
+//       success: true,
+//       message: 'Product video updated successfully',
+//       videoUrl
+//     });
+//   } catch (error) {
+//     console.error('Update product video error:', error);
+//     res.status(500).json({ error: 'Failed to update product video', details: error.message });
+//   }
+// });
+
+// Update product video
+router.put('/admin/products/:id/video', authenticateToken, requireAdmin, upload.single('video'), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const file = req.file;
+
+    if (!file) return res.status(400).json({ error: 'No video uploaded' });
+
+    const [url] = await uploadFiles([file], 'products/videos');
+
+    await db.collection('products').doc(id).update({
+      video: url,
+      updatedAt: new Date().toISOString()
+    });
+
+    res.json({ success: true, video: url });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to update video', details: err.message });
+  }
+});
+
+// NEW: Remove product video
+router.delete('/admin/products/:id/video', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    // Get current product
+    const productDoc = await db.collection('products').doc(id).get();
+    if (!productDoc.exists) {
+      return res.status(404).json({ error: 'Product not found' });
+    }
+    
+    // Remove video (set to empty string)
+    await db.collection('products').doc(id).update({
+      video: '',
+      updatedAt: new Date().toISOString()
+    });
+    
+    res.json({
+      success: true,
+      message: 'Product video removed successfully'
+    });
+  } catch (error) {
+    console.error('Remove product video error:', error);
+    res.status(500).json({ error: 'Failed to remove product video', details: error.message });
+  }
+});
+
+
+
+// Similarly update the PUT route
+router.put('/admin/products/:id', authenticateToken, requireAdmin, upload.fields([
+  { name: 'images', maxCount: 5 },
+  { name: 'video', maxCount: 1 }
+]), async (req, res) => {
   try {
     const { id } = req.params;
     const updateData = req.body;
@@ -960,9 +1259,14 @@ router.put('/admin/products/:id', authenticateToken, requireAdmin, upload.array(
     if (updateData.gst) updateData.gst = parseFloat(updateData.gst);
     if (updateData.features) updateData.features = JSON.parse(updateData.features);
 
-    if (files && files.length > 0) {
-      const imageUrls = await uploadImages(files);
+    if (files.images && files.images.length > 0) {
+      const imageUrls = await uploadFiles(files.images, 'products/images');
       updateData.images = imageUrls;
+    }
+
+    if (files.video && files.video.length > 0) {
+      const videoUrls = await uploadFiles(files.video, 'products/videos');
+      updateData.video = videoUrls[0];
     }
 
     const productDoc = await db.collection('products').doc(id).get();
