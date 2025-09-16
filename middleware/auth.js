@@ -22,7 +22,7 @@ const authenticateToken = async (req, res, next) => {
 
     const userData = userDoc.data();
     req.user = {
-      uid: userData.uid,
+      uid: decoded.uid, // Use the JWT token's uid, not the document's uid
       email: userData.email,
       role: userData.role || 'user'
     };

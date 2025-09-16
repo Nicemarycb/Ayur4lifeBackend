@@ -771,7 +771,7 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-const { db } = require('../config/firebase');
+const { db, admin } = require('../config/firebase');
 const { authenticateToken, requireAdmin } = require('../middleware/auth');
 
 const router = express.Router();
@@ -780,6 +780,7 @@ const router = express.Router();
 router.post('/login', async (req, res) => {
   try {
     const { email, password } = req.body;
+    console.log('Admin login attempt for email:', email);
 
     if (!email || !password) {
       return res.status(400).json({ error: 'Email and password are required' });
@@ -793,22 +794,30 @@ router.post('/login', async (req, res) => {
       .get();
 
     if (adminSnapshot.empty) {
+      console.log('No admin user found for email:', email);
       return res.status(401).json({ error: 'Invalid credentials or not an admin' });
     }
 
     const adminDoc = adminSnapshot.docs[0];
     const adminData = adminDoc.data();
+    console.log('Admin user found:', { docId: adminDoc.id, adminData });
 
     // Verify password
     const isValidPassword = await bcrypt.compare(password, adminData.password || '');
     if (!isValidPassword) {
+      console.log('Invalid password for admin user:', email);
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
-    // Generate JWT token
+    console.log('Password verified successfully for admin user:', email);
+
+    // Generate JWT token using document ID as uid
+    const adminUid = adminDoc.id; // Use document ID as uid
+    console.log('Generating JWT token with uid:', adminUid);
+    
     const token = jwt.sign(
       { 
-        uid: adminData.uid, 
+        uid: adminUid, 
         email: adminData.email, 
         role: 'admin' 
       },
@@ -816,17 +825,22 @@ router.post('/login', async (req, res) => {
       { expiresIn: '7d' }
     );
 
-    res.json({
+    console.log('JWT token generated successfully');
+
+    const responseData = {
       message: 'Admin login successful',
       token,
       admin: {
-        uid: adminData.uid,
+        uid: adminUid,
         email: adminData.email,
         firstName: adminData.firstName,
         lastName: adminData.lastName,
         role: adminData.role
       }
-    });
+    };
+
+    console.log('Sending admin login response:', responseData);
+    res.json(responseData);
 
   } catch (error) {
     console.error('Admin login error:', error);
@@ -837,27 +851,36 @@ router.post('/login', async (req, res) => {
 // Verify Admin Token
 router.get('/verify', authenticateToken, requireAdmin, async (req, res) => {
   try {
+    console.log('Admin verification request for user:', req.user.uid);
+    
     const adminDoc = await db.collection('users').doc(req.user.uid).get();
     
     if (!adminDoc.exists) {
+      console.log('Admin document not found for UID:', req.user.uid);
       return res.status(404).json({ error: 'Admin not found' });
     }
 
     const adminData = adminDoc.data();
+    console.log('Admin data found:', adminData);
+    
     if (adminData.role !== 'admin') {
+      console.log('User role is not admin:', adminData.role);
       return res.status(403).json({ error: 'Access denied' });
     }
 
-    res.json({
+    const adminResponse = {
       isAdmin: true,
       admin: {
-        uid: adminData.uid,
+        uid: req.user.uid,
         email: adminData.email,
         firstName: adminData.firstName,
         lastName: adminData.lastName,
         role: adminData.role
       }
-    });
+    };
+
+    console.log('Sending admin verification response:', adminResponse);
+    res.json(adminResponse);
 
   } catch (error) {
     console.error('Admin verification error:', error);
@@ -1005,7 +1028,10 @@ router.get('/orders/:id', authenticateToken, requireAdmin, async (req, res) => {
       items: orderData.items || [],
       itemCount: orderData.totalItems || (orderData.items ? orderData.items.reduce((sum, item) => sum + item.quantity, 0) : 0),
       subtotal: orderData.subtotal || 0,
+      sgstAmount: orderData.sgstAmount || 0,
+      cgstAmount: orderData.cgstAmount || 0,
       gstAmount: orderData.gstAmount || 0,
+      deliveryCharge: orderData.deliveryCharge || 0,
       discountAmount: orderData.discountAmount || 0,
       finalAmount: orderData.finalAmount || 0,
       total: orderData.finalAmount || orderData.subtotal || 0,  // Fallback for consistency
@@ -1099,6 +1125,12 @@ router.get('/orders', authenticateToken, requireAdmin, async (req, res) => {
         items: orderData.items || [],
         itemCount: itemCount,
         subtotal: orderData.subtotal || 0,
+        sgstAmount: orderData.sgstAmount || 0,
+        cgstAmount: orderData.cgstAmount || 0,
+        gstAmount: orderData.gstAmount || 0,
+        deliveryCharge: orderData.deliveryCharge || 0,
+        discountAmount: orderData.discountAmount || 0,
+        couponCode: orderData.couponCode || null,
         total: orderData.finalAmount || orderData.total || 0,
         status: orderData.status || 'pending',
         shippingAddress: orderData.shippingAddress || {},
@@ -1249,6 +1281,9 @@ router.get('/users/:id/orders', authenticateToken, requireAdmin, async (req, res
       orders.push({
         id: doc.id,
         orderId: orderData.orderNumber || `#${doc.id.slice(-8).toUpperCase()}`,
+        subtotal: orderData.subtotal || 0,
+        gstAmount: orderData.gstAmount || 0,
+        deliveryCharge: orderData.deliveryCharge || 0,
         total: orderData.finalAmount || orderData.total || 0,
         status: orderData.status || 'pending',
         createdAt: orderData.createdAt,
@@ -1299,6 +1334,77 @@ router.delete('/orders/:id', authenticateToken, requireAdmin, async (req, res) =
   } catch (error) {
     console.error('Delete order error:', error);
     res.status(500).json({ error: 'Failed to delete order', details: error.message });
+  }
+});
+
+// Update Admin Profile
+router.put('/profile', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const { firstName, lastName, email } = req.body;
+    const adminUid = req.user.uid;
+
+    console.log('Profile update request:', { adminUid, firstName, lastName, email });
+
+    // Validate input
+    if (!firstName || !lastName || !email) {
+      return res.status(400).json({ error: 'First name, last name, and email are required' });
+    }
+
+    // Check if admin user exists
+    const adminDoc = await db.collection('users').doc(adminUid).get();
+    if (!adminDoc.exists) {
+      return res.status(404).json({ error: 'Admin user not found' });
+    }
+
+    // Check if email is already taken by another user
+    const emailCheckSnapshot = await db.collection('users')
+      .where('email', '==', email)
+      .get();
+
+    let emailTaken = false;
+    emailCheckSnapshot.forEach(doc => {
+      if (doc.id !== adminUid) {
+        emailTaken = true;
+      }
+    });
+
+    if (emailTaken) {
+      return res.status(400).json({ error: 'Email is already taken by another user' });
+    }
+
+    // Update admin profile
+    const updateData = {
+      firstName: firstName.trim(),
+      lastName: lastName.trim(),
+      email: email.trim().toLowerCase(),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp()
+    };
+
+    console.log('Updating admin profile with:', updateData);
+
+    await db.collection('users').doc(adminUid).update(updateData);
+
+    // Get updated admin data
+    const updatedAdminDoc = await db.collection('users').doc(adminUid).get();
+    const updatedAdminData = updatedAdminDoc.data();
+
+    console.log('Profile updated successfully:', updatedAdminData);
+
+    res.json({
+      success: true,
+      message: 'Profile updated successfully',
+      admin: {
+        uid: adminUid,
+        email: updatedAdminData.email,
+        firstName: updatedAdminData.firstName,
+        lastName: updatedAdminData.lastName,
+        role: updatedAdminData.role
+      }
+    });
+
+  } catch (error) {
+    console.error('Update admin profile error:', error);
+    res.status(500).json({ error: 'Failed to update profile', details: error.message });
   }
 });
 

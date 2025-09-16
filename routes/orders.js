@@ -11,7 +11,14 @@ router.post('/', authenticateToken, async (req, res) => {
       shippingAddress, 
       paymentMethod, 
       paymentDetails,
-      couponCode 
+      couponCode,
+      discountAmount,
+      subtotal: checkoutSubtotal,
+      sgst: checkoutSgst,
+      cgst: checkoutCgst,
+      gst: checkoutGst,
+      deliveryCharge: checkoutDeliveryCharge,
+      total: checkoutTotal
     } = req.body;
 
     // Get user's cart
@@ -26,6 +33,8 @@ router.post('/', authenticateToken, async (req, res) => {
     const orderItems = [];
     let subtotal = 0;
     let totalItems = 0;
+    let perProductDeliveryCharge = 0;
+    let freeDeliveryThreshold = Number.POSITIVE_INFINITY;
 
     // Process each cart item
     for (const doc of cartSnapshot.docs) {
@@ -60,6 +69,14 @@ router.post('/', authenticateToken, async (req, res) => {
       subtotal += itemTotal;
       totalItems += cartItem.quantity;
 
+      // Accumulate delivery charge rules
+      if (product.deliveryCharge) {
+        perProductDeliveryCharge += (parseFloat(product.deliveryCharge) || 0) * cartItem.quantity;
+      }
+      if (product.freeDeliveryThreshold && parseFloat(product.freeDeliveryThreshold) > 0) {
+        freeDeliveryThreshold = Math.min(freeDeliveryThreshold, parseFloat(product.freeDeliveryThreshold));
+      }
+
       // Update product stock
       await productDoc.ref.update({
         stock: product.stock - cartItem.quantity,
@@ -67,19 +84,39 @@ router.post('/', authenticateToken, async (req, res) => {
       });
     }
 
-    // ✅ GST only once on subtotal
-    const gstAmount = subtotal * 0.18; 
-    const discountAmount = 0; // coupon logic if needed
-    const finalAmount = subtotal + gstAmount - discountAmount;
+    // Use checkout data if available, otherwise calculate
+    const finalSubtotal = checkoutSubtotal || subtotal;
+    const finalSgstAmount = checkoutSgst || 0;
+    const finalCgstAmount = checkoutCgst || 0;
+    const finalGstAmount = checkoutGst || (finalSgstAmount + finalCgstAmount);
+    const finalDiscountAmount = discountAmount || 0;
+    
+    // Compute delivery charge (server-side authoritative)
+    // Rule: if subtotal >= min freeDeliveryThreshold among items -> free
+    let deliveryCharge = 0;
+    if (!(freeDeliveryThreshold !== Number.POSITIVE_INFINITY && subtotal >= freeDeliveryThreshold)) {
+      deliveryCharge = perProductDeliveryCharge;
+    }
+    
+    // Use checkout delivery charge if available
+    if (checkoutDeliveryCharge !== undefined) {
+      deliveryCharge = checkoutDeliveryCharge;
+    }
+
+    // Calculate final amount: (Subtotal - Discount) + GST + Delivery
+    const finalAmount = checkoutTotal || (finalSubtotal - finalDiscountAmount + finalGstAmount + deliveryCharge);
 
     // Create order
     const orderData = {
       userId: req.user.uid,
       userEmail: req.user.email,
       items: orderItems,
-      subtotal: parseFloat(subtotal.toFixed(2)),
-      gstAmount: parseFloat(gstAmount.toFixed(2)),
-      discountAmount: parseFloat(discountAmount.toFixed(2)),
+      subtotal: parseFloat(finalSubtotal.toFixed(2)),
+      sgstAmount: parseFloat(finalSgstAmount.toFixed(2)),
+      cgstAmount: parseFloat(finalCgstAmount.toFixed(2)),
+      gstAmount: parseFloat(finalGstAmount.toFixed(2)),
+      deliveryCharge: parseFloat(deliveryCharge.toFixed(2)),
+      discountAmount: parseFloat(finalDiscountAmount.toFixed(2)),
       finalAmount: parseFloat(finalAmount.toFixed(2)),
       totalItems,
       shippingAddress: shippingAddress || {},

@@ -45,14 +45,28 @@ router.get('/', authenticateToken, async (req, res) => {
       }
     }
 
-    // ✅ GST applied once on subtotal
-    const gstAmount = subtotal * 0.18;
-    const finalAmount = subtotal + gstAmount;
+    // Calculate SGST and CGST based on product rates
+    let totalSgst = 0;
+    let totalCgst = 0;
+    
+    for (const item of cartItems) {
+      const itemSubtotal = item.itemTotal;
+      const sgstRate = parseFloat(item.product.sgst || 0) / 100;
+      const cgstRate = parseFloat(item.product.cgst || 0) / 100;
+      
+      totalSgst += itemSubtotal * sgstRate;
+      totalCgst += itemSubtotal * cgstRate;
+    }
+    
+    const totalGst = totalSgst + totalCgst;
+    const finalAmount = subtotal + totalGst;
 
     res.json({
       cartItems,
       subtotal: parseFloat(subtotal.toFixed(2)),
-      gstAmount: parseFloat(gstAmount.toFixed(2)),
+      sgstAmount: parseFloat(totalSgst.toFixed(2)),
+      cgstAmount: parseFloat(totalCgst.toFixed(2)),
+      gstAmount: parseFloat(totalGst.toFixed(2)),
       finalAmount: parseFloat(finalAmount.toFixed(2)),
       totalItems
     });
@@ -135,7 +149,7 @@ router.post('/add', authenticateToken, async (req, res) => {
       
       if (prodDoc.exists) {
         const prod = prodDoc.data();
-        const itemTotal = (prod.price + (prod.gst || 0)) * cartItem.quantity;
+        const itemTotal = prod.price * cartItem.quantity;
         
         cartItems.push({
           id: doc.id,
@@ -155,14 +169,32 @@ router.post('/add', authenticateToken, async (req, res) => {
       }
     }
 
+    // Calculate SGST and CGST based on product rates
+    let totalSgst = 0;
+    let totalCgst = 0;
+    
+    for (const item of cartItems) {
+      const itemSubtotal = item.itemTotal;
+      const sgstRate = parseFloat(item.product.sgst || 0) / 100;
+      const cgstRate = parseFloat(item.product.cgst || 0) / 100;
+      
+      totalSgst += itemSubtotal * sgstRate;
+      totalCgst += itemSubtotal * cgstRate;
+    }
+    
+    const totalGst = totalSgst + totalCgst;
+    const finalAmount = totalAmount + totalGst;
+
     res.json({
       message: 'Item added to cart successfully',
       updatedQuantity,
       cartItems,  // Return full updated cart
       totalAmount: parseFloat(totalAmount.toFixed(2)),
       totalItems,
-      gstAmount: parseFloat((totalAmount * 0.18).toFixed(2)),
-      finalAmount: parseFloat((totalAmount * 1.18).toFixed(2))
+      sgstAmount: parseFloat(totalSgst.toFixed(2)),
+      cgstAmount: parseFloat(totalCgst.toFixed(2)),
+      gstAmount: parseFloat(totalGst.toFixed(2)),
+      finalAmount: parseFloat(finalAmount.toFixed(2))
     });
 
   } catch (error) {
@@ -227,7 +259,7 @@ router.put('/update/:id', authenticateToken, async (req, res) => {
       
       if (prodDoc.exists) {
         const prod = prodDoc.data();
-        const itemTotal = (prod.price + (prod.gst || 0)) * updatedCartItem.quantity;
+        const itemTotal = prod.price * updatedCartItem.quantity;
         
         cartItems.push({
           id: doc.id,
@@ -247,13 +279,31 @@ router.put('/update/:id', authenticateToken, async (req, res) => {
       }
     }
 
+    // Calculate SGST and CGST based on product rates
+    let totalSgst = 0;
+    let totalCgst = 0;
+    
+    for (const item of cartItems) {
+      const itemSubtotal = item.itemTotal;
+      const sgstRate = parseFloat(item.product.sgst || 0) / 100;
+      const cgstRate = parseFloat(item.product.cgst || 0) / 100;
+      
+      totalSgst += itemSubtotal * sgstRate;
+      totalCgst += itemSubtotal * cgstRate;
+    }
+    
+    const totalGst = totalSgst + totalCgst;
+    const finalAmount = totalAmount + totalGst;
+
     res.json({
       message: 'Cart item updated successfully',
       cartItems,  // Return full updated cart
       totalAmount: parseFloat(totalAmount.toFixed(2)),
       totalItems,
-      gstAmount: parseFloat((totalAmount * 0.18).toFixed(2)),
-      finalAmount: parseFloat((totalAmount * 1.18).toFixed(2))
+      sgstAmount: parseFloat(totalSgst.toFixed(2)),
+      cgstAmount: parseFloat(totalCgst.toFixed(2)),
+      gstAmount: parseFloat(totalGst.toFixed(2)),
+      finalAmount: parseFloat(finalAmount.toFixed(2))
     });
 
   } catch (error) {
@@ -297,7 +347,7 @@ router.delete('/remove/:id', authenticateToken, async (req, res) => {
       
       if (productDoc.exists) {
         const product = productDoc.data();
-        const itemTotal = (product.price + (product.gst || 0)) * updatedCartItem.quantity;
+        const itemTotal = product.price * updatedCartItem.quantity;
         
         cartItems.push({
           id: doc.id,
@@ -317,14 +367,32 @@ router.delete('/remove/:id', authenticateToken, async (req, res) => {
       }
     }
 
+    // Calculate SGST and CGST based on product rates
+    let totalSgst = 0;
+    let totalCgst = 0;
+    
+    for (const item of cartItems) {
+      const itemSubtotal = item.itemTotal;
+      const sgstRate = parseFloat(item.product.sgst || 0) / 100;
+      const cgstRate = parseFloat(item.product.cgst || 0) / 100;
+      
+      totalSgst += itemSubtotal * sgstRate;
+      totalCgst += itemSubtotal * cgstRate;
+    }
+    
+    const totalGst = totalSgst + totalCgst;
+    const finalAmount = totalAmount + totalGst;
+
     res.json({
       message: 'Item removed from cart successfully',
       cartItemId: id,
       cartItems,  // Return updated cart items
       totalAmount: parseFloat(totalAmount.toFixed(2)),
       totalItems,
-      gstAmount: parseFloat((totalAmount * 0.18).toFixed(2)),
-      finalAmount: parseFloat((totalAmount * 1.18).toFixed(2))
+      sgstAmount: parseFloat(totalSgst.toFixed(2)),
+      cgstAmount: parseFloat(totalCgst.toFixed(2)),
+      gstAmount: parseFloat(totalGst.toFixed(2)),
+      finalAmount: parseFloat(finalAmount.toFixed(2))
     });
 
   } catch (error) {
@@ -371,7 +439,15 @@ router.get('/summary', authenticateToken, async (req, res) => {
       if (productDoc.exists) {
         const product = productDoc.data();
         totalItems += cartItem.quantity;
-        totalAmount += (product.price + (product.gst || 0)) * cartItem.quantity;
+        // Calculate SGST and CGST for this item
+        const sgstRate = parseFloat(product.sgst || 0) / 100;
+        const cgstRate = parseFloat(product.cgst || 0) / 100;
+        const itemSubtotal = product.price * cartItem.quantity;
+        const itemSgst = itemSubtotal * sgstRate;
+        const itemCgst = itemSubtotal * cgstRate;
+        const itemGst = itemSgst + itemCgst;
+        
+        totalAmount += itemSubtotal + itemGst;
       }
     }
 

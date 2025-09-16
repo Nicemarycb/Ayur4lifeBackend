@@ -743,6 +743,15 @@ router.get('/', optionalAuth, async (req, res) => {
     let products = [];
     snapshot.forEach(doc => {
       const data = doc.data();
+      
+      // Clean up malformed image URLs
+      if (data.images && Array.isArray(data.images)) {
+        data.images = data.images.filter(img => 
+          img && typeof img === 'string' && img.length > 10 && 
+          (img.startsWith('http') || img.startsWith('/') && img.length > 5)
+        );
+      }
+      
       console.log('Fetched product:', { id: doc.id, ...data }); // Debug log
       products.push({ id: doc.id, ...data });
     });
@@ -837,6 +846,15 @@ router.get('/category/:category', optionalAuth, async (req, res) => {
     let products = [];
     snapshot.forEach(doc => {
       const data = doc.data();
+      
+      // Clean up malformed image URLs
+      if (data.images && Array.isArray(data.images)) {
+        data.images = data.images.filter(img => 
+          img && typeof img === 'string' && img.length > 10 && 
+          (img.startsWith('http') || img.startsWith('/') && img.length > 5)
+        );
+      }
+      
       console.log('Fetched product for category:', { id: doc.id, ...data }); // Debug log
       products.push({ id: doc.id, ...data });
     });
@@ -878,7 +896,17 @@ router.get('/:id', optionalAuth, async (req, res) => {
       return res.status(404).json({ error: 'Product not found' });
     }
     
-    const product = { id: productDoc.id, ...productDoc.data() };
+    const productData = productDoc.data();
+    
+    // Clean up malformed image URLs
+    if (productData.images && Array.isArray(productData.images)) {
+      productData.images = productData.images.filter(img => 
+        img && typeof img === 'string' && img.length > 10 && 
+        (img.startsWith('http') || img.startsWith('/') && img.length > 5)
+      );
+    }
+    
+    const product = { id: productDoc.id, ...productData };
     console.log('Returning product by ID:', product); // Debug log
     
     if (req.user) {
@@ -903,7 +931,7 @@ router.post('/admin/products', authenticateToken, requireAdmin, upload.fields([
   { name: 'video', maxCount: 1 }
 ]), async (req, res) => {
   try {
-    const { name, description, price, category, stock, gst, features } = req.body;
+    const { name, description, price, category, stock, sgst, cgst, features, quantityUnit, deliveryCharge, freeDeliveryThreshold } = req.body;
     const files = req.files;
 
     if (!name || !description || !price || !category || stock === undefined) {
@@ -927,7 +955,11 @@ router.post('/admin/products', authenticateToken, requireAdmin, upload.fields([
       price: parseFloat(price),
       category,
       stock: parseInt(stock),
-      gst: parseFloat(gst) || 0,
+      sgst: parseFloat(sgst) || 0,
+      cgst: parseFloat(cgst) || 0,
+      quantityUnit: quantityUnit || 'piece',
+      deliveryCharge: parseFloat(deliveryCharge) || 0,
+      freeDeliveryThreshold: parseFloat(freeDeliveryThreshold) || 0,
       images: imageUrls,
       video: videoUrl,  // Add video URL
       features: features ? JSON.parse(features) : [],
@@ -1256,7 +1288,11 @@ router.put('/admin/products/:id', authenticateToken, requireAdmin, upload.fields
 
     if (updateData.price) updateData.price = parseFloat(updateData.price);
     if (updateData.stock) updateData.stock = parseInt(updateData.stock);
-    if (updateData.gst) updateData.gst = parseFloat(updateData.gst);
+    if (updateData.sgst) updateData.sgst = parseFloat(updateData.sgst);
+    if (updateData.cgst) updateData.cgst = parseFloat(updateData.cgst);
+    if (updateData.quantityUnit) updateData.quantityUnit = updateData.quantityUnit;
+    if (updateData.deliveryCharge) updateData.deliveryCharge = parseFloat(updateData.deliveryCharge);
+    if (updateData.freeDeliveryThreshold) updateData.freeDeliveryThreshold = parseFloat(updateData.freeDeliveryThreshold);
     if (updateData.features) updateData.features = JSON.parse(updateData.features);
 
     if (files.images && files.images.length > 0) {
@@ -1322,10 +1358,22 @@ router.delete('/admin/products/:id', authenticateToken, requireAdmin, async (req
 router.get('/admin/products', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const snapshot = await db.collection("products").orderBy("createdAt", "desc").get();
-    const products = snapshot.docs.map(doc => ({
-      id: doc.id,
-      ...doc.data(),
-    }));
+    const products = snapshot.docs.map(doc => {
+      const data = doc.data();
+      
+      // Clean up malformed image URLs
+      if (data.images && Array.isArray(data.images)) {
+        data.images = data.images.filter(img => 
+          img && typeof img === 'string' && img.length > 10 && 
+          (img.startsWith('http') || img.startsWith('/') && img.length > 5)
+        );
+      }
+      
+      return {
+        id: doc.id,
+        ...data,
+      };
+    });
     res.json({ products });   // ✅ always return { products: [...] }
   } catch (error) {
     console.error("Error fetching admin products:", error);
